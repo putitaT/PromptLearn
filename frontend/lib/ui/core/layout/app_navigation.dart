@@ -25,16 +25,18 @@ class AppNavigation extends StatelessWidget {
     required this.vertical,
     required this.onSelected,
     required this.onSwitchRole,
+    this.reviewStyle = false,
   });
 
   final AppDestination destination;
   final bool vertical;
   final ValueChanged<AppDestination> onSelected;
   final VoidCallback onSwitchRole;
+  final bool reviewStyle;
 
   @override
   Widget build(BuildContext context) {
-    const logoSize = 48.0;
+    final logoSize = reviewStyle ? 60.0 : 48.0;
     final logo = _imageButton(
       label: 'Switch login role',
       asset: 'mark.png',
@@ -119,6 +121,17 @@ class AppNavigation extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
+              if (selected && reviewStyle)
+                Center(
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: const Color(0x14FFFFFF),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                ),
               Center(
                 child: SvgPicture.asset(
                   'assets/navigation/${item.asset}',
@@ -146,7 +159,7 @@ class AppNavigation extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (selected && !compact)
+              if (selected && !compact && !reviewStyle)
                 Align(
                   alignment: AlignmentDirectional.centerStart,
                   child: FractionallySizedBox(

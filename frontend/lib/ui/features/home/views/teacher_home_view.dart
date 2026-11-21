@@ -3,7 +3,11 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../syllabus/models/syllabus_preview.dart';
+import '../../syllabus/view_models/syllabus_editor_view_model.dart';
+import '../../syllabus/views/syllabus_editor_view.dart';
 import '../../syllabus/views/teacher_syllabus_dialog.dart';
+import '../../syllabus/widgets/syllabus_dashed_border.dart';
+import '../../syllabus/views/teacher_course_detail_view.dart';
 import '../widgets/home_header.dart';
 
 const _paper = Color(0xFFFFFFFF);
@@ -18,10 +22,12 @@ class TeacherHomeView extends StatelessWidget {
     super.key,
     required this.displayName,
     required this.now,
+    this.reviewNavigation,
   });
 
   final String displayName;
   final DateTime now;
+  final Widget? reviewNavigation;
 
   @override
   Widget build(BuildContext context) {
@@ -90,10 +96,12 @@ class TeacherHomeView extends StatelessWidget {
                                     child: _DashboardRow(
                                       horizontal: width >= 900,
                                       flexes: const [387, 387, 300],
-                                      children: const [
-                                        _Attention(),
-                                        _ClassPulse(),
-                                        _Syllabi(),
+                                      children: [
+                                        const _Attention(),
+                                        const _ClassPulse(),
+                                        _Syllabi(
+                                          reviewNavigation: reviewNavigation,
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -182,8 +190,14 @@ TextStyle _style(
   );
 }
 
-Widget _heading(BuildContext context, String title, Widget trailing) {
+Widget _heading(
+  BuildContext context,
+  String title,
+  Widget trailing, {
+  CrossAxisAlignment alignment = CrossAxisAlignment.center,
+}) {
   return Row(
+    crossAxisAlignment: alignment,
     children: [
       Expanded(
         child: Text(title, style: _style(context, 18, weight: FontWeight.w700)),
@@ -195,11 +209,17 @@ Widget _heading(BuildContext context, String title, Widget trailing) {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill(this.label, {this.color = _highlight, this.icon});
+  const _Pill(
+    this.label, {
+    this.color = _highlight,
+    this.icon,
+    this.foreground = _text,
+  });
 
   final String label;
   final Color color;
   final IconData? icon;
+  final Color foreground;
 
   @override
   Widget build(BuildContext context) {
@@ -214,11 +234,16 @@ class _Pill extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           spacing: 5,
           children: [
-            if (icon != null) Icon(icon, size: 14, color: _text),
+            if (icon != null) Icon(icon, size: 14, color: foreground),
             Flexible(
               child: Text(
                 label,
-                style: _style(context, 12, weight: FontWeight.w600),
+                style: _style(
+                  context,
+                  12,
+                  weight: FontWeight.w600,
+                  color: foreground,
+                ),
               ),
             ),
           ],
@@ -573,14 +598,16 @@ class _Attention extends StatelessWidget {
   Widget build(BuildContext context) {
     const items = [
       (
-        Icons.error_outline,
-        Color(0xFFFFF1D6),
+        Icons.warning_amber_rounded,
+        Color(0xFFFFE4D8),
+        Color(0xFF9A4500),
         'Review 4 quiz papers',
         'AI wasn’t sure how to score these answers.',
       ),
       (
         Icons.auto_awesome_outlined,
-        _lavender,
+        Color(0xFFE1F4E9),
+        Color(0xFF179661),
         'Approve 7 practice sets',
         'Made from each student’s mistakes.',
       ),
@@ -588,18 +615,30 @@ class _Attention extends StatelessWidget {
     return _card(
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 10,
+        spacing: 12,
         children: [
-          _heading(context, 'Needs your attention', const _Pill('2')),
-          for (final (icon, color, title, description) in items)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                spacing: 12,
-                children: [
-                  _TileIcon(icon, color: color),
-                  Expanded(child: _EntryText(title, description)),
-                ],
+          _heading(
+            context,
+            'Needs your attention',
+            const _Pill('2', color: AppColors.ink, foreground: _paper),
+          ),
+          for (final (icon, color, foreground, title, description) in items)
+            Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _showDetails(context, title, Text(description)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    spacing: 12,
+                    children: [
+                      _TileIcon(icon, color: color, foreground: foreground),
+                      Expanded(child: _EntryText(title, description)),
+                      const Icon(Icons.chevron_right, color: AppColors.ink),
+                    ],
+                  ),
+                ),
               ),
             ),
         ],
@@ -622,7 +661,7 @@ class _ClassPulse extends StatelessWidget {
     return _card(
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 10,
+        spacing: 14,
         children: [
           _heading(
             context,
@@ -638,10 +677,10 @@ class _ClassPulse extends StatelessWidget {
                 border: Border.all(color: _line, width: 2),
                 borderRadius: BorderRadius.circular(14),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                spacing: 6,
+                spacing: 8,
                 children: [
                   Row(
                     spacing: 8,
@@ -673,13 +712,25 @@ class _ClassPulse extends StatelessWidget {
                       _Pill(
                         status,
                         color: status == 'On track'
-                            ? _highlight
-                            : const Color(0xFFFFF1D6),
+                            ? const Color(0xFFE7F3EC)
+                            : _lavender,
+                        icon: status == 'On track'
+                            ? Icons.check
+                            : Icons.schedule,
+                        foreground: status == 'On track'
+                            ? const Color(0xFF22704F)
+                            : const Color(0xFF2B2A86),
                       ),
                     ],
                   ),
-                  _Metric('Attendance', attendance, AppColors.primary),
-                  _Metric('Homework done', homework, AppColors.sage),
+                  _Metric('Attendance', attendance, _upcomingGreen),
+                  _Metric(
+                    'Homework done',
+                    homework,
+                    status == 'On track'
+                        ? _upcomingGreen
+                        : const Color(0xFF2B2A86),
+                  ),
                 ],
               ),
             ),
@@ -701,7 +752,7 @@ class _Metric extends StatelessWidget {
     return Row(
       spacing: 8,
       children: [
-        Flexible(
+        Expanded(
           flex: 3,
           child: Text(
             label,
@@ -709,50 +760,83 @@ class _Metric extends StatelessWidget {
           ),
         ),
         Expanded(
-          flex: 2,
+          flex: 5,
           child: LinearProgressIndicator(
             value: percent / 100,
             color: color,
-            backgroundColor: _line,
+            backgroundColor: const Color(0xFFE7F3EC),
             minHeight: 6,
             borderRadius: BorderRadius.circular(6),
           ),
         ),
-        Text('$percent%', style: _style(context, 12, weight: FontWeight.w600)),
+        SizedBox(
+          width: 34,
+          child: Text(
+            '$percent%',
+            textAlign: TextAlign.end,
+            style: _style(context, 12, weight: FontWeight.w600),
+          ),
+        ),
       ],
     );
   }
 }
 
 class _TileIcon extends StatelessWidget {
-  const _TileIcon(this.icon, {required this.color, this.size = 40});
+  const _TileIcon(this.icon, {required this.color, required this.foreground});
 
   final IconData icon;
   final Color color;
-  final double size;
+  final Color foreground;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Icon(icon, color: _text, size: 20),
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      child: Icon(icon, color: foreground, size: 18),
     );
   }
 }
 
-class _Syllabi extends StatelessWidget {
-  const _Syllabi();
+class _Syllabi extends StatefulWidget {
+  const _Syllabi({this.reviewNavigation});
+
+  final Widget? reviewNavigation;
+
+  @override
+  State<_Syllabi> createState() => _SyllabiState();
+}
+
+class _SyllabiState extends State<_Syllabi> {
+  final _draft = SyllabusEditorViewModel();
+
+  @override
+  void dispose() {
+    _draft.dispose();
+    super.dispose();
+  }
 
   void _showCreateSyllabus(BuildContext context) {
-    _showDetails(
-      context,
-      'Create syllabus',
-      const Text('The syllabus editor is unavailable in this preview.'),
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => SyllabusEditorView(
+          draft: _draft,
+          reviewNavigation: widget.reviewNavigation,
+        ),
+      ),
+    );
+  }
+
+  void _showCourse(BuildContext context, SyllabusPreview course) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => TeacherCourseDetailView(
+          course: course,
+          navigation: widget.reviewNavigation,
+        ),
+      ),
     );
   }
 
@@ -761,58 +845,133 @@ class _Syllabi extends StatelessWidget {
     return _card(
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 10,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        spacing: 14,
         children: [
-          _heading(
-            context,
-            'My syllabus',
-            TextButton(
-              onPressed: () => showDialog<void>(
-                context: context,
-                barrierColor: const Color(0x87101010),
-                builder: (context) => TeacherSyllabusDialog(
-                  syllabi: teacherSyllabusPreviews,
-                  onCreateSyllabus: () => _showCreateSyllabus(context),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _heading(
+                context,
+                'My syllabus',
+                TextButton(
+                  style: TextButton.styleFrom(
+                    alignment: Alignment.topCenter,
+                    minimumSize: const Size(0, 44),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 3,
+                    ),
+                  ),
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    barrierColor: const Color(0x87101010),
+                    builder: (context) => TeacherSyllabusDialog(
+                      syllabi: teacherSyllabusPreviews,
+                      onCreateSyllabus: () => _showCreateSyllabus(context),
+                      onOpenCourse: (course) => _showCourse(context, course),
+                    ),
+                  ),
+                  child: const Text('See all'),
+                ),
+                alignment: CrossAxisAlignment.start,
+              ),
+              _courseList(context),
+            ],
+          ),
+          CustomPaint(
+            foregroundPainter: const SyllabusDashedBorder(
+              color: Color(0xFFC9D3CD),
+              radius: 12,
+            ),
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _text,
+                minimumSize: const Size(0, 48),
+                side: BorderSide.none,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('See all'),
+              onPressed: () => _showCreateSyllabus(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Create syllabus'),
             ),
-          ),
-          _courseList(),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _text,
-              minimumSize: const Size(0, 48),
-              side: const BorderSide(color: Color(0xFFC9D3CD), width: 2),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: () => _showCreateSyllabus(context),
-            icon: const Icon(Icons.add),
-            label: const Text('Create syllabus'),
           ),
         ],
       ),
     );
   }
 
-  Widget _courseList() {
+  Widget _courseList(BuildContext context) {
     return Column(
-      spacing: 12,
+      spacing: 24,
       children: [
         for (final syllabus in teacherSyllabusPreviews.take(3))
-          Row(
-            spacing: 12,
-            children: [
-              _TileIcon(
-                Icons.menu_book_outlined,
-                color: syllabus.coverColor,
-                size: 52,
+          Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _showCourse(context, syllabus),
+              child: Row(
+                spacing: 12,
+                children: [
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: syllabus.coverColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      spacing: 4,
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              syllabus.title,
+                              style: _style(
+                                context,
+                                14,
+                                weight: FontWeight.w700,
+                              ),
+                            ),
+                            if (syllabus.isDraft)
+                              const _Pill(
+                                'Draft',
+                                color: _lavender,
+                                foreground: Color(0xFF2B2A86),
+                              ),
+                          ],
+                        ),
+                        Text(
+                          syllabus.title == 'Math 101'
+                              ? 'M.1 · ${syllabus.classCount} classes · ${syllabus.taughtPeriods} / ${syllabus.periods} periods'
+                              : syllabus.homeSummary,
+                          style: _style(
+                            context,
+                            12,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                        LinearProgressIndicator(
+                          value: syllabus.taughtPeriods / syllabus.periods,
+                          color: _upcomingGreen,
+                          backgroundColor: const Color(0xFFE7F3EC),
+                          minHeight: 5,
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              Expanded(child: _EntryText(syllabus.title, syllabus.homeSummary)),
-              if (syllabus.isDraft) const _Pill('Draft', color: _lavender),
-            ],
+            ),
           ),
       ],
     );

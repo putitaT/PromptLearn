@@ -8,6 +8,7 @@ class SyllabusPreview {
     required this.classCount,
     required this.studentCount,
     this.draftStep,
+    this.taughtPeriods = 0,
   });
 
   final String title;
@@ -16,6 +17,7 @@ class SyllabusPreview {
   final int classCount;
   final int studentCount;
   final int? draftStep;
+  final int taughtPeriods;
 
   bool get isDraft => draftStep != null;
 
@@ -38,6 +40,7 @@ class SyllabusPreview {
 const teacherSyllabusPreviews = [
   SyllabusPreview(
     title: 'Math 101',
+    taughtPeriods: 24,
     grade: 7,
     periods: 54,
     classCount: 3,
@@ -45,6 +48,7 @@ const teacherSyllabusPreviews = [
   ),
   SyllabusPreview(
     title: 'Math 201',
+    taughtPeriods: 43,
     grade: 8,
     periods: 48,
     classCount: 2,
@@ -60,6 +64,7 @@ const teacherSyllabusPreviews = [
   ),
   SyllabusPreview(
     title: 'Math 102',
+    taughtPeriods: 2,
     grade: 7,
     periods: 42,
     classCount: 3,

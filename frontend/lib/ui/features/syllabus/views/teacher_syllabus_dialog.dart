@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../models/syllabus_preview.dart';
+import '../widgets/syllabus_dashed_border.dart';
 
 const _ink = Color(0xFF202438);
 const _white = Color(0xFFFFFFFF);
@@ -15,10 +16,12 @@ class TeacherSyllabusDialog extends StatelessWidget {
     super.key,
     required this.syllabi,
     required this.onCreateSyllabus,
+    required this.onOpenCourse,
   });
 
   final List<SyllabusPreview> syllabi;
   final VoidCallback onCreateSyllabus;
+  final ValueChanged<SyllabusPreview> onOpenCourse;
 
   @override
   Widget build(BuildContext context) {
@@ -92,7 +95,10 @@ class TeacherSyllabusDialog extends StatelessWidget {
                         for (final syllabus in syllabi)
                           SizedBox(
                             width: cardWidth,
-                            child: _SyllabusCard(syllabus: syllabus),
+                            child: _SyllabusCard(
+                              syllabus: syllabus,
+                              onTap: () => onOpenCourse(syllabus),
+                            ),
                           ),
                         SizedBox(
                           width: cardWidth,
@@ -114,9 +120,10 @@ class TeacherSyllabusDialog extends StatelessWidget {
 }
 
 class _SyllabusCard extends StatelessWidget {
-  const _SyllabusCard({required this.syllabus});
+  const _SyllabusCard({required this.syllabus, required this.onTap});
 
   final SyllabusPreview syllabus;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -136,97 +143,108 @@ class _SyllabusCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            constraints: const BoxConstraints(minHeight: 140),
-            color: syllabus.coverColor,
-            alignment: Alignment.topLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                color: _white,
-                borderRadius: BorderRadius.all(Radius.circular(999)),
-              ),
-              child: Padding(
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onTap,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                constraints: const BoxConstraints(minHeight: 140),
+                color: syllabus.coverColor,
+                alignment: Alignment.topLeft,
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 3,
+                  horizontal: 18,
+                  vertical: 16,
                 ),
-                child: Text(
-                  syllabus.status,
-                  style: _style(
-                    context,
-                    12,
-                    weight: FontWeight.w600,
-                    color: draft
-                        ? const Color(0xFF1A1F60)
-                        : const Color(0xFF22704F),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: 12,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  spacing: 10,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        syllabus.title,
-                        style: _style(context, 20, weight: FontWeight.w700),
-                      ),
-                    ),
-                    Flexible(
-                      child: Text(
-                        '${syllabus.periods} periods',
-                        textAlign: TextAlign.end,
-                        style: _style(context, 18, weight: FontWeight.w700),
-                      ),
-                    ),
-                  ],
-                ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: draft
-                        ? const Color(0xFFF2F3FF)
-                        : const Color(0xFFE7F3EC),
-                    borderRadius: const BorderRadius.all(Radius.circular(6)),
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: _white,
+                    borderRadius: BorderRadius.all(Radius.circular(999)),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 4,
+                      vertical: 3,
                     ),
                     child: Text(
-                      '${syllabus.grade}th Grade',
+                      syllabus.status,
                       style: _style(
                         context,
-                        13,
+                        12,
                         weight: FontWeight.w600,
-                        height: 20 / 13,
+                        color: draft
+                            ? const Color(0xFF1A1F60)
+                            : const Color(0xFF22704F),
                       ),
                     ),
                   ),
                 ),
-                Text(
-                  '${syllabus.classCount} classes · ${syllabus.studentCount} students',
-                  style: _style(context, 13, color: AppColors.mutedText),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: 12,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      spacing: 10,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            syllabus.title,
+                            style: _style(context, 20, weight: FontWeight.w700),
+                          ),
+                        ),
+                        Flexible(
+                          child: Text(
+                            '${syllabus.periods} periods',
+                            textAlign: TextAlign.end,
+                            style: _style(context, 18, weight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: draft
+                            ? const Color(0xFFF2F3FF)
+                            : const Color(0xFFE7F3EC),
+                        borderRadius: const BorderRadius.all(
+                          Radius.circular(6),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        child: Text(
+                          '${syllabus.grade}th Grade',
+                          style: _style(
+                            context,
+                            13,
+                            weight: FontWeight.w600,
+                            height: 20 / 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${syllabus.classCount} classes · ${syllabus.studentCount} students',
+                      style: _style(context, 13, color: AppColors.mutedText),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -240,7 +258,7 @@ class _CreateSyllabusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
-      foregroundPainter: const _DashedBorder(),
+      foregroundPainter: const SyllabusDashedBorder(),
       child: Material(
         color: const Color(0xFFF7FCF9),
         borderRadius: const BorderRadius.all(Radius.circular(20)),
@@ -282,34 +300,6 @@ class _CreateSyllabusCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class _DashedBorder extends CustomPainter {
-  const _DashedBorder();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final outline = RRect.fromRectAndRadius(
-      (Offset.zero & size).deflate(1),
-      const Radius.circular(19),
-    );
-    final stroke = Paint()
-      ..color = const Color(0xFFA6DCB9)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    final path = Path()..addRRect(outline);
-    for (final edge in path.computeMetrics()) {
-      for (var start = 0.0; start < edge.length; start += 12) {
-        canvas.drawPath(
-          edge.extractPath(start, math.min(start + 7, edge.length)),
-          stroke,
-        );
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorder oldDelegate) => false;
 }
 
 TextStyle _style(

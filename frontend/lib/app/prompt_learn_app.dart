@@ -126,7 +126,24 @@ class _PromptLearnShellState extends State<_PromptLearnShell> {
     final now = DateTime.now();
 
     return switch (widget.role) {
-      UserRole.teacher => TeacherHomeView(displayName: displayName, now: now),
+      UserRole.teacher => TeacherHomeView(
+        displayName: displayName,
+        now: now,
+        reviewNavigation: AppNavigation(
+          destination: AppDestination.courses,
+          vertical: true,
+          reviewStyle: true,
+          onSelected: (destination) {
+            if (destination == AppDestination.courses) return;
+            Navigator.of(context).popUntil((route) => route.isFirst);
+            setState(() => _destination = destination);
+          },
+          onSwitchRole: () {
+            Navigator.of(context).popUntil((route) => route.isFirst);
+            widget.onSwitchRole();
+          },
+        ),
+      ),
       UserRole.student => SingleChildScrollView(
         child: StudentHomeView(displayName: displayName, now: now),
       ),
