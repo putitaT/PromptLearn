@@ -344,7 +344,7 @@ addEventListener("DOMContentLoaded", () => {{
     <li><a href="#createSyllabus">Save the draft</a>, then <a href="#publishSyllabus">publish it</a>. Students read the latest <a href="#getPublishedSyllabus">published view</a>.</li>
   </ol>
   <p class="description">In an edited plan, assessment period numbers start at 1 within each unit. Responses number periods across the entire semester. HTML strings in examples are shortened.</p>
-  <p class="description">For video replay, <a href="#uploadReplayRecording">upload a clip and transcript</a>, <a href="#publishReplayRecording">publish the clip</a>, then <a href="#getPublishedReplay">read the current replay</a>. <a href="video-replay-curl.md">Try the flow with curl</a>.</p>
+  <p class="description">For video replay, <a href="#uploadReplayRecording">upload an MP4 for transcription</a>, <a href="#previewReplayRecording">preview the draft as a teacher</a>, then <a href="#publishReplayRecording">publish it</a> for <a href="#getPublishedReplay">student replay</a>. <a href="video-replay-curl.md">Try the flow with curl</a>.</p>
 </section>
 <section class="quickstart" aria-labelledby="assignment-workflow">
   <h2 id="assignment-workflow">Check assignment work</h2>

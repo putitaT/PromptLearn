@@ -101,7 +101,6 @@ class _ReplayPlayerState extends State<ReplayPlayer> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('Transcript', style: Theme.of(context).textTheme.titleMedium),
-            const Text('Transcript เตรียมไว้สำหรับเดโม'),
             const SizedBox(height: 8),
             for (final (index, cue) in _cues.indexed)
               ListTile(

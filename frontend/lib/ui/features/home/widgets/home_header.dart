@@ -5,16 +5,10 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 
 class HomeHeader extends StatelessWidget {
-  const HomeHeader({
-    super.key,
-    required this.displayName,
-    required this.now,
-    this.teacherLayout = false,
-  });
+  const HomeHeader({super.key, required this.displayName, required this.now});
 
   final String displayName;
   final DateTime now;
-  final bool teacherLayout;
 
   @override
   Widget build(BuildContext context) {
@@ -34,9 +28,8 @@ class HomeHeader extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final wide = constraints.maxWidth >= 760;
-          final large = teacherLayout && constraints.maxWidth >= 900;
           return ConstrainedBox(
-            constraints: BoxConstraints(minHeight: large ? 142 : 100),
+            constraints: const BoxConstraints(minHeight: 100),
             child: Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: wide ? 42 : 16,
@@ -74,7 +67,6 @@ class HomeHeader extends StatelessWidget {
                           '$greeting $displayName',
                           style: textTheme.titleLarge?.copyWith(
                             color: AppColors.ink,
-                            fontSize: large ? 32 : null,
                             height: 1.16,
                             letterSpacing: -0.165,
                           ),
@@ -87,7 +79,7 @@ class HomeHeader extends StatelessWidget {
                     tooltip: 'Notifications',
                     style: IconButton.styleFrom(
                       backgroundColor: AppColors.notificationBackground,
-                      fixedSize: Size.square(large ? 70 : 48),
+                      fixedSize: const Size.square(48),
                     ),
                     icon: SvgPicture.asset(
                       'assets/navigation/notifications.svg',

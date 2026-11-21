@@ -46,7 +46,9 @@ psql -X -v ON_ERROR_STOP=1 -d promptlearn_dev -f db_migration/demo_seed.sql
 psql -X -v ON_ERROR_STOP=1 -d promptlearn_dev -f db_migration/assignment_review_demo_seed.sql
 ```
 
-ตั้ง `ASSIGNMENT_REVIEW_DATABASE_URL` ให้ backend ชี้ฐานเดโม จากนั้นเรียก `hw-3-2/q4` ระบบใช้บัญชีนักเรียนตัวอย่างที่กำหนดฝั่ง server การตรวจแต่ละครั้งเขียน revision, ผลตรวจ และ feedback ใน transaction เดียว คะแนนทางการยังอยู่ใน flow เผยแพร่คะแนน
+ตั้ง `ASSIGNMENT_REVIEW_DATABASE_URL` ให้ backend ชี้ฐานเดโม จากนั้นเรียกรายการของ `hw-3-1` ด้วยรหัส `q1`, `q2`, `q3` และ `q5` จาก Flutter หรือทดสอบตัวอย่างเดิม `hw-3-2/q4` หากฐานเดโมเคย seed ไว้แล้ว ให้รัน `assignment_review_demo_seed.sql` อีกครั้งเพื่อเพิ่ม HW 3.1 ฉบับที่ 3 ซึ่งใช้โจทย์สมการในข้อ 4 (รหัส `q5`) ประวัติของฉบับก่อนหน้ายังอยู่ในฐานเดิม ระบบใช้บัญชีนักเรียนตัวอย่างที่กำหนดฝั่ง server การตรวจแต่ละครั้งเขียน revision, ผลตรวจ และ feedback ใน transaction เดียว คะแนนทางการยังอยู่ใน flow เผยแพร่คะแนน
+
+เมื่อ Submit ครบ 4 ข้อ Go จะบันทึกรายงานคะแนนระหว่างเรียนไว้ใน `assignment_submission_reports` พร้อมรหัสผลตรวจ ข้อความ OCR และจุดที่ต้องทบทวนของแต่ละข้อ ฐานเดโมเดิมสามารถรัน `assignment_review.sql` ซ้ำเพื่อเพิ่มตารางนี้
 
 ## การตัดสินใจตาม frontend flow
 

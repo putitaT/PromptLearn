@@ -9,7 +9,7 @@ info:
     published snapshot. This demo is designed for a trusted local environment. Response examples abbreviate
     document_html for readability.
     Assignment review accepts OCR evidence for one assignment item and returns guided questions with the original OCR bounds.
-    Video Replay provides a separate local demo for uploading a recording with a prepared transcript,
+    Video Replay provides a local demo for uploading an MP4, generating a transcript with gpt-transcribe,
     publishing it, and playing the published MP4 through the Go backend.
 servers:
   - url: http://127.0.0.1:8080
@@ -21,6 +21,7 @@ tags:
   - name: Timetable
   - name: Student View
   - name: Assignment Review
+  - name: Assessment Rubrics
   - name: Video Replay
 paths:
   /healthz:
@@ -374,8 +375,11 @@ paths:
       operationId: reviewAssignmentWork
       summary: Check the student's reasoning on one assignment item
       description: |
-        Local scaffold using a seeded assignment item. The backend loads the private question and rubric.
-        Submit OCR blocks in reading order and the same photo used to derive their normalized boxes.
+        Local demo for HW 3.1 (q1, q2, q3, q5) and the original HW 3.2 example (q4). The backend loads the private question and rubric.
+        Flutter sends the full paper PNG as a Base64 data URL. In OpenAI mode, if the client omits OCR blocks, the backend measures ink rows on the original image and transcribes them.
+        The image-only path is designed for dark handwriting on the light Flutter notebook with rows in one column.
+        Clients that already perform OCR can send positioned blocks in reading order and the same image used to find their boxes.
+        Use issue boxes as fractions of the full image, measured from the top-left corner. The response does not include an annotated image.
         The request body limit is 5 MiB. Each completed review is saved as feedback on the in-progress attempt.
       parameters:
         - name: assignment_id
@@ -397,6 +401,8 @@ paths:
             examples:
               paperWork:
                 $ref: '#/components/examples/AssignmentReviewInput'
+              imageOnly:
+                $ref: '#/components/examples/AssignmentReviewImageOnly'
       responses:
         '200':
           description: Saved review result with its review ID and optional OCR highlights
@@ -451,7 +457,7 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example: {code: unsupported_media_type, message: send application/json}
         '502':
-          description: The reviewer failed or could not anchor its findings to submitted blocks
+          description: The reviewer or OCR failed, or the findings could not be anchored to OCR blocks
           content:
             application/json:
               schema:
@@ -476,16 +482,139 @@ paths:
                 $ref: '#/components/schemas/APIError'
               example: {code: review_timeout, message: assignment review timed out}
 
+  /v1/assignments/{assignment_id}/submissions:
+    post:
+      tags: [Assignment Review]
+      operationId: submitReviewedHomework
+      summary: Save the results of a completed homework submission
+      description: |
+        HW 3.1 requires one saved review per question (q1, q2, q3, and q5). The item q5 is displayed as question 4. Go resolves the reviews for the demo student,
+        calculates a formative score, and saves the selected answers and their mistakes as a report.
+        An unreadable answer has null awarded points and remains pending. Repeating the same set of
+        review IDs returns the same saved report.
+      parameters:
+        - name: assignment_id
+          in: path
+          required: true
+          schema: {type: string, enum: [hw-3-1]}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [review_ids]
+              properties:
+                review_ids:
+                  type: array
+                  minItems: 4
+                  maxItems: 4
+                  uniqueItems: true
+                  items: {type: string}
+            example:
+              review_ids: [review-q1, review-q2, review-q3, review-q5]
+      responses:
+        '201':
+          description: Formative report saved with question scores and highlighted mistakes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeworkSubmissionReport'
+              example:
+                id: report-example
+                assignment_id: hw-3-1
+                submitted_at: '2026-11-21T07:45:00Z'
+                points: 2
+                max_points: 4
+                pending: 1
+                questions:
+                  - {position: 1, item_id: q1, review_id: review-q1, prompt: 'Simplify x² · x³.', recognized_work: 'x^(2+3) = x^5', status: correct, message: 'Your work is correct.', awarded_points: 1, max_points: 1}
+                  - {position: 2, item_id: q2, review_id: review-q2, prompt: 'Simplify (a³)².', recognized_work: 'a^(3·2) = a^6', status: correct, message: 'Your work is correct.', awarded_points: 1, max_points: 1}
+                  - {position: 3, item_id: q3, review_id: review-q3, prompt: 'Simplify y⁶ ÷ y², where y ≠ 0.', recognized_work: '', status: unreadable, message: 'The work could not be read confidently.', awarded_points: null, max_points: 1}
+                  - {position: 4, item_id: q5, review_id: review-q5, prompt: 'Solve for x: x + 7 = 22.', recognized_work: 'x = 22 + 7', status: needs_revision, message: 'Take another look at the highlighted step.', awarded_points: 0, max_points: 1}
+                mistakes:
+                  - position: 4
+                    work: 'x = 22 + 7'
+                    block_id: line-2
+                    box: {x: 0.075, y: 0.39, width: 0.3, height: 0.17}
+                    kind: equivalence
+                    observation: Compare this line with the one before it.
+                    hint: How could you check whether the expression still has the same value after this change?
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: The local demo requires a loopback peer and host
+        '404':
+          description: An assignment or review is unavailable for the demo student
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '415':
+          description: Request Content-Type must be application/json
+        '502':
+          description: Stored review evidence could not be read or validated
+        '503':
+          description: The submission report could not be saved
+
+  /v1/assessments/rubric/draft:
+    post:
+      tags: [Assessment Rubrics]
+      operationId: draftAssessmentRubric
+      summary: Draft a private answer and scoring guide for one question
+      description: |
+        Loopback-only teacher demo. Drafts answers, lesson alignment and plausible mistakes with OpenAI.
+        For Show work, full credit must total the question points and each partial score must fit its full score.
+        Send teacher_request and previous to ask for a revision of an existing draft.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssessmentRubricInput'
+            example:
+              lesson:
+                title: Multiplying powers with the same base
+                steps: [Expand both powers and count the factors.]
+              question:
+                kind: showWork
+                prompt: Simplify (x²)(x⁵). Show each step.
+                points: 1
+      responses:
+        '200':
+          description: Draft for teacher review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentRubricDraft'
+        '400':
+          description: Invalid JSON, lesson, question or revision request
+        '403':
+          description: The request did not come from the loopback interface
+        '413':
+          description: The request exceeds 64 KiB
+        '415':
+          description: The request needs an application/json content type
+        '502':
+          description: OpenAI failed to return a valid draft
+        '503':
+          description: OpenAI is missing from the backend configuration
+        '504':
+          description: The AI request timed out
+
   /api/demo/recordings:
     post:
       tags: [Video Replay]
       operationId: uploadReplayRecording
-      summary: Upload a draft recording and its prepared transcript
+      summary: Upload an MP4 for timestamped transcription
       description: |
         Available on loopback when REPLAY_DEMO_DATABASE_URL is configured. Uploading a draft leaves the
         current publication visible. The video must be an MP4 with H.264 video and AAC audio if present.
-        The transcript is a UTF-8 JSON array of ReplaySegment objects, ordered by strictly increasing
-        startMs. Each cue must end within the clip duration.
+        The server selects OpenAI transcription by default when OPENAI_API_KEY is configured. In this mode,
+        it extracts audio and splits it at pauses before sending WAV segments
+        to gpt-transcribe. Cue timestamps are calculated from each segment's position in the original
+        clip. The server returns after saving the draft. Local Whisper mode and an optional prepared
+        UTF-8 transcript JSON file are also supported. Cues must have strictly increasing startMs
+        and end within the clip duration.
       parameters:
         - $ref: '#/components/parameters/ReplayTeacherRole'
       requestBody:
@@ -501,7 +630,7 @@ paths:
                 contentType: application/json
       responses:
         '201':
-          description: Draft created. Use recordingId to publish the clip.
+          description: Draft and transcript saved. Use recordingId to publish the clip.
           content:
             application/json:
               schema:
@@ -514,8 +643,36 @@ paths:
           $ref: '#/components/responses/ReplayForbidden'
         '413':
           $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: Missing audio track or no transcript generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayError'
+              example: {code: invalid_audio, message: คลิปต้องมีแทร็กเสียงสำหรับถอดเสียง}
         '500':
           $ref: '#/components/responses/ReplayFailed'
+        '502':
+          description: OpenAI transcription failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayError'
+              example: {code: transcription_failed, message: บริการถอดเสียงตอบกลับไม่สำเร็จ ลองใหม่อีกครั้ง}
+        '503':
+          description: No transcription provider is configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayError'
+              example: {code: transcription_unavailable, message: ยังไม่ได้ตั้งค่าบริการถอดเสียงบน backend}
+        '504':
+          description: Transcription exceeded its processing deadline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayError'
+              example: {code: transcription_timeout, message: ถอดเสียงเกินเวลา ลองใหม่อีกครั้ง}
 
   /api/demo/publication:
     put:
@@ -617,26 +774,9 @@ paths:
       description: The URL is available while its recording is the current publication for the demo lesson.
       responses:
         '200':
-          description: Complete MP4
-          headers:
-            Accept-Ranges:
-              description: Supported range unit
-              schema: {type: string, enum: [bytes]}
-          content:
-            video/mp4:
-              schema: {type: string, format: binary}
+          $ref: '#/components/responses/ReplayVideo'
         '206':
-          description: Requested byte range or ranges
-          headers:
-            Content-Range:
-              description: Byte range and total file size for a single range
-              schema: {type: string}
-              example: bytes 0-1023/794872
-          content:
-            video/mp4:
-              schema: {type: string, format: binary}
-            multipart/byteranges:
-              schema: {type: string, format: binary}
+          $ref: '#/components/responses/ReplayVideoRange'
         '304':
           description: The file has not been modified since the requested validator
         '403':
@@ -681,6 +821,44 @@ paths:
           description: Invalid or unsatisfiable byte range
         '500':
           description: The service could not read the video
+
+  /api/demo/recordings/{id}/preview:
+    get:
+      tags: [Video Replay]
+      operationId: previewReplayRecording
+      summary: Preview an uploaded recording as the demo teacher
+      description: Plays a valid uploaded clip before or after publication. The preview is served with Cache-Control no-store.
+      parameters:
+        - $ref: '#/components/parameters/ReplayTeacherRole'
+        - name: id
+          in: path
+          required: true
+          description: Recording ID returned by the upload endpoint.
+          schema: {type: string, format: uuid}
+          example: '8f368301-2f08-4a28-a652-97e07eef40d0'
+        - name: Range
+          in: header
+          description: Optional HTTP byte range for preview playback.
+          schema: {type: string}
+          example: bytes=0-1023
+      responses:
+        '200':
+          $ref: '#/components/responses/ReplayVideo'
+        '206':
+          $ref: '#/components/responses/ReplayVideoRange'
+        '304':
+          description: The file has not been modified since the requested validator
+        '403':
+          $ref: '#/components/responses/ReplayForbidden'
+        '404':
+          $ref: '#/components/responses/ReplayRecordingNotFound'
+        '416':
+          description: Invalid or unsatisfiable byte range
+          content:
+            text/plain:
+              schema: {type: string}
+        '500':
+          $ref: '#/components/responses/ReplayFailed'
 
 components:
   parameters:
@@ -760,13 +938,34 @@ components:
             $ref: '#/components/schemas/APIError'
           example: {code: course_failed, message: course operation failed}
 
+    ReplayVideo:
+      description: Complete MP4
+      headers:
+        Accept-Ranges:
+          description: Supported range unit
+          schema: {type: string, enum: [bytes]}
+      content:
+        video/mp4:
+          schema: {type: string, format: binary}
+    ReplayVideoRange:
+      description: Requested byte range or ranges
+      headers:
+        Content-Range:
+          description: Byte range and total file size for a single range
+          schema: {type: string}
+          example: bytes 0-1023/794872
+      content:
+        video/mp4:
+          schema: {type: string, format: binary}
+        multipart/byteranges:
+          schema: {type: string, format: binary}
     ReplayInvalidMedia:
       description: Missing file part, invalid MP4, or invalid transcript
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ReplayError'
-          example: {code: invalid_media, message: เลือกไฟล์ MP4 และ transcript JSON}
+          example: {code: invalid_media, message: เลือกไฟล์ MP4}
     ReplayForbidden:
       description: Teacher role required for writes, or the request host is outside loopback
       content:
@@ -796,12 +995,12 @@ components:
       properties:
         code:
           type: string
-          enum: [invalid_json, invalid_media, forbidden, recording_not_found, replay_error]
+          enum: [invalid_json, invalid_media, invalid_audio, forbidden, recording_not_found, replay_error, transcription_failed, transcription_unavailable, transcription_timeout]
         message:
           type: string
     ReplayUpload:
       type: object
-      required: [video, transcript]
+      required: [video]
       properties:
         video:
           type: string
@@ -810,7 +1009,7 @@ components:
         transcript:
           type: string
           format: binary
-          description: JSON file part containing a nonempty array of ReplaySegment objects. Maximum 256 KiB.
+          description: Optional prepared JSON file containing a nonempty array of ReplaySegment objects. Maximum 256 KiB.
     ReplayRecordingRef:
       type: object
       additionalProperties: false
@@ -877,6 +1076,76 @@ components:
     Term:
       type: integer
       enum: [1, 2]
+    AssessmentRubricInput:
+      type: object
+      required: [lesson, question]
+      properties:
+        lesson:
+          type: object
+          required: [title, steps]
+          properties:
+            title: {type: string}
+            steps:
+              type: array
+              minItems: 1
+              items: {type: string}
+        question:
+          type: object
+          required: [kind, prompt, points]
+          properties:
+            kind:
+              type: string
+              enum: [shortAnswer, showWork, multipleChoice, trueFalse]
+            prompt: {type: string}
+            points: {type: integer, minimum: 1}
+            options:
+              description: Two to four distinct strings for multiple choice
+              type: array
+              minItems: 2
+              maxItems: 4
+              items: {type: string}
+        teacher_request: {type: string}
+        previous:
+          $ref: '#/components/schemas/AssessmentRubricDraft'
+    AssessmentRubricDraft:
+      type: object
+      required: [answer, correct_option, alignment, alignment_reason, criteria, mistakes, note]
+      properties:
+        answer:
+          type: string
+          description: Suggested model answer, possibly blank for an ambiguous question
+        correct_option:
+          type: integer
+          nullable: true
+          description: Zero-based option index. For trueFalse, 0 is True and 1 is False.
+        alignment:
+          type: string
+          enum: [aligned, out_of_scope, unclear]
+        alignment_reason: {type: string}
+        criteria:
+          type: array
+          maxItems: 6
+          items:
+            type: object
+            required: [name, description, full_points, full_description, partial_points, partial_description, none_description]
+            properties:
+              name: {type: string}
+              description: {type: string}
+              full_points: {type: number}
+              full_description: {type: string}
+              partial_points: {type: number, nullable: true}
+              partial_description: {type: string}
+              none_description: {type: string}
+        mistakes:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [example, reason]
+            properties:
+              example: {type: string}
+              reason: {type: string}
+        note: {type: string}
     APIError:
       type: object
       required: [code, message]
@@ -1249,7 +1518,7 @@ components:
     AssignmentReviewInput:
       type: object
       additionalProperties: false
-      description: Submit OCR text, positioned OCR blocks or a photo. Provide blocks to enable highlights.
+      description: Submit OCR text, positioned OCR blocks or an image. In OpenAI mode image-only input can also produce highlights.
       anyOf:
         - required: [text]
           properties:
@@ -1281,7 +1550,7 @@ components:
       type: object
       required: [block_id, box, kind, observation, hint]
       properties:
-        block_id: {type: string, description: Original submitted OCR block ID.}
+        block_id: {type: string, description: OCR block ID from the client or generated by the backend.}
         box:
           $ref: '#/components/schemas/OCRBox'
         kind:
@@ -1306,6 +1575,41 @@ components:
           description: Highlights in reading order. Empty for correct and unreadable work.
           items:
             $ref: '#/components/schemas/AssignmentReviewIssue'
+    HomeworkSubmissionReport:
+      type: object
+      required: [id, assignment_id, submitted_at, points, max_points, pending, questions, mistakes]
+      properties:
+        id: {type: string}
+        assignment_id: {type: string}
+        submitted_at: {type: string, format: date-time}
+        points: {type: number}
+        max_points: {type: number}
+        pending: {type: integer, description: Number of unreadable answers with no score yet.}
+        questions:
+          type: array
+          items:
+            type: object
+            required: [position, item_id, review_id, prompt, recognized_work, status, message, awarded_points, max_points]
+            properties:
+              position: {type: integer}
+              item_id: {type: string}
+              review_id: {type: string}
+              prompt: {type: string}
+              recognized_work: {type: string}
+              status: {type: string, enum: [correct, needs_revision, unreadable]}
+              message: {type: string}
+              awarded_points: {type: number, nullable: true}
+              max_points: {type: number}
+        mistakes:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/AssignmentReviewIssue'
+              - type: object
+                required: [position, work]
+                properties:
+                  position: {type: integer}
+                  work: {type: string, description: OCR text from the flagged block only.}
   examples:
     Health:
       summary: Service is reachable
@@ -1664,8 +1968,13 @@ components:
               y: 0.689655
               width: 0.209375
               height: 0.131034
-        image_data_url: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAACRAQAAAACa/lw5AAACY0lEQVR42u2VPW/TUBSGn3yUOsgSphJShn64E6vHDEi1qIT6M/IPYEaIOBQx9x+UsQMLWybkgaFbPIJYXHWIBxS5JIMTbB8Gu1WRmnvvD/BZzvLc89577rn3bQlm0aYBG/ABsIBo5foFRDeWrwYnWTosYAJDBbgGFpN0DXSyVL1H7/euD3hLVNJdeIdTpY3RBdKLAd6yn14MgL5KerD9qk6Fq+yjG1GnPFWBSR7A0k7ygNnEVlV09k9JwNk/tdTSW8cdQtg67ni2EuwCZ1XaHCIyzUXKo8U0F5HFQh6ONkAeUPqQB7oxW4UUAaxCIjX4J2ZdpWy5CewEQHvXm9tzu73rdePHtqJinPKzC3FK70QpfTmgTpanak/VkWmdVO0xfVwlAGGdFKAFgFMnxR5zERE5qtOGPbYaV2jABrwP+usbP7p6EuhAiddpDK1QL72cvX67ncZaMOTHYJKglS5Ti8NP2sOI7xIPATwlOO7Fe33gy8pXmyaMfgF8zGK19CibQ0RyMn3T11T0nwOR53hqQxK5EjmXA5HZTET54zqAuNq7HlttoPQNhmKOxuBuT30N/IXP2oqXASwhTXTgDngJ+GGiAYMQvlo8PdMNxWF1d85Q13ARqVp9rmm4SdyuuBYRkQN9xcraXP3jelSN+kawsbgGbMD/La7gg8lzLQ9yQVRxJ53Li8BEOsx4abLHMo1MDiO+S7cch9rPvhfv9fuaincW5xpIj7K5vuH3LM4EfGZTGF2hY3bXlcUZVZyb/uHfRfLy/Ug/FJeBofQOwDcD6f0jMZrHyuLGyoKNKzRgAzagPv4B9/4EQrZS8DsAAAAASUVORK5CYII=
+        image_data_url: &example_review_png data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAACRAQAAAACa/lw5AAACY0lEQVR42u2VPW/TUBSGn3yUOsgSphJShn64E6vHDEi1qIT6M/IPYEaIOBQx9x+UsQMLWybkgaFbPIJYXHWIBxS5JIMTbB8Gu1WRmnvvD/BZzvLc89577rn3bQlm0aYBG/ABsIBo5foFRDeWrwYnWTosYAJDBbgGFpN0DXSyVL1H7/euD3hLVNJdeIdTpY3RBdKLAd6yn14MgL5KerD9qk6Fq+yjG1GnPFWBSR7A0k7ygNnEVlV09k9JwNk/tdTSW8cdQtg67ni2EuwCZ1XaHCIyzUXKo8U0F5HFQh6ONkAeUPqQB7oxW4UUAaxCIjX4J2ZdpWy5CewEQHvXm9tzu73rdePHtqJinPKzC3FK70QpfTmgTpanak/VkWmdVO0xfVwlAGGdFKAFgFMnxR5zERE5qtOGPbYaV2jABrwP+usbP7p6EuhAiddpDK1QL72cvX67ncZaMOTHYJKglS5Ti8NP2sOI7xIPATwlOO7Fe33gy8pXmyaMfgF8zGK19CibQ0RyMn3T11T0nwOR53hqQxK5EjmXA5HZTET54zqAuNq7HlttoPQNhmKOxuBuT30N/IXP2oqXASwhTXTgDngJ+GGiAYMQvlo8PdMNxWF1d85Q13ARqVp9rmm4SdyuuBYRkQN9xcraXP3jelSN+kawsbgGbMD/La7gg8lzLQ9yQVRxJ53Li8BEOsx4abLHMo1MDiO+S7cch9rPvhfv9fuaincW5xpIj7K5vuH3LM4EfGZTGF2hY3bXlcUZVZyb/uHfRfLy/Ug/FJeBofQOwDcD6f0jMZrHyuLGyoKNKzRgAzagPv4B9/4EQrZS8DsAAAAASUVORK5CYII=
         focused_block_id: line-2
+        language: en
+    AssignmentReviewImageOnly:
+      summary: Full worksheet PNG with OCR performed by the backend in OpenAI mode
+      value:
+        image_data_url: *example_review_png
         language: en
     AssignmentReviewNeedsRevision:
       summary: Highlight the first step that combined the powers incorrectly

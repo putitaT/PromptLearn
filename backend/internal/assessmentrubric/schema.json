@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answer", "correct_option", "alignment", "alignment_reason", "criteria", "mistakes", "note"],
+  "properties": {
+    "answer": {"type": "string"},
+    "correct_option": {"type": ["integer", "null"]},
+    "alignment": {"type": "string", "enum": ["aligned", "out_of_scope", "unclear"]},
+    "alignment_reason": {"type": "string"},
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "description", "full_points", "full_description", "partial_points", "partial_description", "none_description"],
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "full_points": {"type": "number"},
+          "full_description": {"type": "string"},
+          "partial_points": {"type": ["number", "null"]},
+          "partial_description": {"type": "string"},
+          "none_description": {"type": "string"}
+        }
+      }
+    },
+    "mistakes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["example", "reason"],
+        "properties": {
+          "example": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "note": {"type": "string"}
+  }
+}

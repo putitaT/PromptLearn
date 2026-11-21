@@ -17,17 +17,26 @@ const (
 	MaxTranscriptBytes = 256 << 10
 )
 
+type Transcriber interface {
+	Transcribe(context.Context, string, int) ([]Segment, error)
+}
+
 var ErrInvalidVideo = errors.New("เลือกไฟล์ MP4 ที่ใช้วิดีโอ H.264 และเสียง AAC")
 var ErrInvalidTranscript = errors.New("ตรวจ transcript ให้มีข้อความและเวลาที่เรียงตามลำดับและอยู่ในช่วงคลิป")
 
-func Probe(ctx context.Context, path string) (int, error) {
+type Media struct {
+	DurationMS int
+	HasAudio   bool
+}
+
+func Probe(ctx context.Context, path string) (Media, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-protocol_whitelist", "file",
 		"-f", "mov", "-show_entries", "format=duration:format_tags=major_brand:stream=codec_name,codec_type",
 		"-of", "json", path).Output()
 	if err != nil {
-		return 0, ErrInvalidVideo
+		return Media{}, ErrInvalidVideo
 	}
 	var info struct {
 		Format struct {
@@ -42,32 +51,33 @@ func Probe(ctx context.Context, path string) (int, error) {
 		}
 	}
 	if err := json.Unmarshal(output, &info); err != nil {
-		return 0, ErrInvalidVideo
+		return Media{}, ErrInvalidVideo
 	}
 	seconds, err := strconv.ParseFloat(info.Format.Duration, 64)
 	duration := math.Ceil(seconds * 1000)
 	if err != nil || math.IsNaN(duration) || duration <= 0 || duration > math.MaxInt32 ||
 		info.Format.Tags.MajorBrand == "" || info.Format.Tags.MajorBrand == "qt  " {
-		return 0, ErrInvalidVideo
+		return Media{}, ErrInvalidVideo
 	}
-	var hasVideo bool
+	var hasVideo, hasAudio bool
 	for _, stream := range info.Streams {
 		switch stream.Type {
 		case "video":
 			if stream.Codec != "h264" {
-				return 0, ErrInvalidVideo
+				return Media{}, ErrInvalidVideo
 			}
 			hasVideo = true
 		case "audio":
 			if stream.Codec != "aac" {
-				return 0, ErrInvalidVideo
+				return Media{}, ErrInvalidVideo
 			}
+			hasAudio = true
 		}
 	}
 	if !hasVideo {
-		return 0, ErrInvalidVideo
+		return Media{}, ErrInvalidVideo
 	}
-	return int(duration), nil
+	return Media{DurationMS: int(duration), HasAudio: hasAudio}, nil
 }
 
 func ParseTranscript(r io.Reader, duration int) ([]Segment, error) {

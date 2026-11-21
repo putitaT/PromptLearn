@@ -29,7 +29,7 @@ func demoWork() Submission {
 
 func TestReviewReturnsOriginalOCRBoxWithGuidingQuestion(t *testing.T) {
 	work := demoWork()
-	service := NewService(openTestDemo(t), DemoReviewer{})
+	service := NewService(openTestDemo(t), DemoReviewer{}, nil)
 	review, err := service.Review(context.Background(), DemoAssignmentID, DemoItemID, work)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestReviewCorrectWorkReturnsNoHighlights(t *testing.T) {
 	work := demoWork()
 	work.Blocks[1].Text, work.Blocks[2].Text = "=x^(2+5)", "=x^7"
 	work.Text = "(x^2)(x^5)\n=x^(2+5)\n=x^7"
-	review, err := NewService(openTestDemo(t), DemoReviewer{}).Review(context.Background(), DemoAssignmentID, DemoItemID, work)
+	review, err := NewService(openTestDemo(t), DemoReviewer{}, nil).Review(context.Background(), DemoAssignmentID, DemoItemID, work)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestReviewRefusesUnanchoredModelFinding(t *testing.T) {
 	reviewer := reviewerFunc(func(context.Context, Question, Submission) (Decision, error) {
 		return Decision{Status: NeedsRevision, Findings: []Finding{{BlockID: "invented", Kind: SameBasePowers}}}, nil
 	})
-	_, err := NewService(openTestDemo(t), reviewer).Review(context.Background(), DemoAssignmentID, DemoItemID, demoWork())
+	_, err := NewService(openTestDemo(t), reviewer, nil).Review(context.Background(), DemoAssignmentID, DemoItemID, demoWork())
 	if !errors.Is(err, ErrInvalidDecision) {
 		t.Fatalf("expected invalid model decision, got %v", err)
 	}
@@ -73,7 +73,7 @@ func TestReviewSkipsModelForInvalidBoxOrUnknownItem(t *testing.T) {
 	service := NewService(openTestDemo(t), reviewerFunc(func(context.Context, Question, Submission) (Decision, error) {
 		t.Fatal("invalid request should not reach the reviewer")
 		return Decision{}, nil
-	}))
+	}), nil)
 	if _, err := service.Review(context.Background(), DemoAssignmentID, "other-question", demoWork()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected unknown item, got %v", err)
 	}
@@ -89,7 +89,7 @@ func TestReviewPersistsEveryOutcomeBeforeReturning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(repo, DemoReviewer{})
+	service := NewService(repo, DemoReviewer{}, nil)
 	first := demoWork()
 	corrected := demoWork()
 	corrected.Text = "(x^2)(x^5)\n=x^(2+5)\n=x^7"

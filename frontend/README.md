@@ -8,6 +8,8 @@
 
 [Design System ของ PromptLearn](DESIGN_SYSTEM.md)
 
+[หน้าทำการบ้านและสัญญากับ backend](HOMEWORK_CHECKER.md)
+
 ## แนวทางการออกแบบ
 
 ช่วงแรกให้พัฒนาและทดสอบบนแท็บเล็ต Android เป็นหลัก โดยรองรับ iPad ด้วย ออกแบบหน้าจอ ทั้งแนวตั้งและแนวนอน ให้หน้าจอปรับตามพื้นที่หน้าต่างที่มี รวมถึงเมื่อแบ่งหน้าจอหรือใช้งานบนโทรศัพท์
@@ -52,7 +54,22 @@ flutter run -d emulator-5554
 หากต้องการลองตรวจด้วย `GET /healthz` ให้รัน Go backend แล้วเปิดแอปบน Android Emulator ด้วยคำสั่งนี้จาก `frontend/`
 
 ```sh
-flutter run -d emulator-5554 --dart-define=PROMPTLEARN_API_BASE_URL=http://10.0.2.2:8080
+adb -s emulator-5554 reverse tcp:8080 tcp:8080
+flutter run -d emulator-5554 --dart-define=PROMPTLEARN_API_BASE_URL=http://127.0.0.1:8080
 ```
 
 แอป debug ส่ง health check หนึ่งครั้งตอนเริ่มเมื่อระบุ URL รายละเอียด HTTP อยู่ใน Chucker และตัวแจ้งเตือนใช้ข้อความสำหรับเปิดหน้าตรวจ
+
+รายการตรวจการบ้านใน Chucker บน Android debug แสดงเมธอด, endpoint, HTTP status, เวลา และ JSON ของ request/response ใน request แสดง Base64 ของรูปเพียง 24 ตัวแรกแล้วต่อด้วย `...` ส่วน API ยังได้รับรูปเต็ม [วิธีทดสอบ HW 3.1 กับ Go](HOMEWORK_CHECKER.md)
+
+## ทดสอบ Course Syllabus จาก Profile
+
+เปิด Go backend และกำหนด `PROMPTLEARN_API_BASE_URL` ตอนบิ้วตามตัวอย่างด้านบน จากนั้นเข้าสู่ระบบเป็น Teacher แล้วเปิด **Profile → Test syllabus integration**
+
+เลือกชั้น ม.1–ม.6 เทอม 1 หรือ 2 และแถวหลักสูตรที่ใช้สอน กด **Generate draft** เพื่อดูร่างภาษาอังกฤษ จากนั้นกด **Download HTML** บน Android เพื่อบันทึกไฟล์ลงเครื่องและเปิดดูด้วยเบราว์เซอร์ แพลตฟอร์มอื่นใช้ **Copy HTML** การกด **Save draft** จะบันทึกร่างใน Go และแสดงรหัสร่าง
+
+เดโมใช้คณิตศาสตร์พื้นฐาน 54 คาบ คาบละ 50 นาที และคะแนน Classwork 40%, Unit Quizzes 30%, Final Exam 30% หน้า ม.1 เทอม 1 เลือกหัวข้อตั้งต้นจากตัวอย่างใน repo [API Spec](../backend/api-spec/index.html#generateSyllabusDraft)
+
+## ทดลอง PL AI
+
+ตั้ง `OPENAI_API_KEY` ใน environment ของ Go backend ตาม [คู่มือ backend](../backend/README.md) แล้วรัน Flutter โดยส่ง `PROMPTLEARN_API_BASE_URL` ตามตัวอย่างด้านบน ปุ่ม **Ask Prompt Learn** จะเปิดแชตจากทุกหน้าหลังเลือกบทบาท ในระหว่างการพัฒนา endpoint รับการเชื่อมต่อจากเครื่องที่รัน backend หรือ Android Emulator ผ่าน `10.0.2.2`

@@ -19,14 +19,30 @@ class ReplayApiException implements Exception {
 abstract final class ReplayApi {
   static Future<ReplayJson> published() => _request('GET', '/api/demo/replay');
 
+  static Future<web.Blob> preview(
+    String recordingId,
+    web.AbortSignal signal,
+  ) async {
+    final path =
+        '/api/demo/recordings/${Uri.encodeComponent(recordingId)}/preview';
+    final headers = web.Headers()..set('X-Demo-Role', 'teacher');
+    final response = await web.window
+        .fetch(
+          path.toJS,
+          web.RequestInit(headers: headers, signal: signal, cache: 'no-store'),
+        )
+        .toDart;
+    if (!response.ok) {
+      throw const ReplayApiException('เปิดพรีวิวคลิปไม่ได้ ลองใหม่อีกครั้ง');
+    }
+    return response.blob().toDart;
+  }
+
   static Future<String> upload(
     web.File video,
-    web.File transcript,
     void Function(double?) onProgress,
   ) async {
-    final form = web.FormData()
-      ..append('video', video, video.name)
-      ..append('transcript', transcript, transcript.name);
+    final form = web.FormData()..append('video', video, video.name);
     final result = await _request(
       'POST',
       '/api/demo/recordings',
@@ -55,7 +71,7 @@ abstract final class ReplayApi {
     final result = Completer<ReplayJson>();
     final request = web.XMLHttpRequest()
       ..open(method, path)
-      ..timeout = 90000;
+      ..timeout = onProgress == null ? 90000 : 250000;
     if (method != 'GET') request.setRequestHeader('X-Demo-Role', 'teacher');
     if (json) request.setRequestHeader('Content-Type', 'application/json');
     if (onProgress != null) {

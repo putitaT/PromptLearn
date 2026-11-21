@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -14,6 +15,12 @@ import (
 	"github.com/opsst/PromptLearn/backend/internal/replay"
 )
 
+type testTranscriber func(context.Context, string, int) ([]replay.Segment, error)
+
+func (f testTranscriber) Transcribe(ctx context.Context, path string, duration int) ([]replay.Segment, error) {
+	return f(ctx, path, duration)
+}
+
 func TestReplayPublication(t *testing.T) {
 	databaseURL := os.Getenv("REPLAY_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -25,7 +32,22 @@ func TestReplayPublication(t *testing.T) {
 	}
 	defer store.Close()
 	dir := t.TempDir()
-	handler := NewDemoHandler(nil, nil, store, dir, "")
+	fixture, err := os.ReadFile("../../examples/thai-lesson.transcript.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	whisperCalls := 0
+	whisper := testTranscriber(func(_ context.Context, path string, duration int) ([]replay.Segment, error) {
+		whisperCalls++
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal(err)
+		}
+		if whisperCalls == 1 {
+			return nil, replay.ErrNoTranscript
+		}
+		return replay.ParseTranscript(bytes.NewReader(fixture), duration)
+	})
+	handler := NewDemoHandler(nil, nil, store, whisper, dir, "")
 	do := func(method, path, role, contentType string, body io.Reader) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, "http://localhost"+path, body)
@@ -56,6 +78,9 @@ func TestReplayPublication(t *testing.T) {
 			{"video", "lesson.mp4", video},
 			{"transcript", "transcript.json", transcript},
 		} {
+			if file.content == nil {
+				continue
+			}
 			part, err := form.CreateFormFile(file.field, file.name)
 			if err != nil {
 				t.Fatal(err)
@@ -83,16 +108,13 @@ func TestReplayPublication(t *testing.T) {
 	}
 	check(do("POST", "/api/demo/recordings", "student", "", nil), http.StatusForbidden)
 	check(upload([]byte(`[{"startMs":0,"endMs":9999999,"text":"เกินคลิป"}]`)), http.StatusBadRequest)
+	check(upload(nil), http.StatusUnprocessableEntity)
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("invalid upload left files: %v, %v", entries, err)
 	}
 
-	transcript, err := os.ReadFile("../../examples/thai-lesson.transcript.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	create := func() string {
+	create := func(transcript []byte) string {
 		t.Helper()
 		rec := upload(transcript)
 		check(rec, http.StatusCreated)
@@ -109,8 +131,20 @@ func TestReplayPublication(t *testing.T) {
 		check(do("PUT", "/api/demo/publication", "teacher", "application/json",
 			strings.NewReader(`{"recordingId":"`+id+`"}`)), http.StatusOK)
 	}
-	first := create()
+	first := create(nil)
 	check(do("GET", videoPath(first), "student", "", nil), http.StatusNotFound)
+	previewPath := "/api/demo/recordings/" + first + "/preview"
+	check(do("GET", previewPath, "student", "", nil), http.StatusForbidden)
+	check(do("HEAD", previewPath, "", "", nil), http.StatusForbidden)
+	preview := do("GET", previewPath, "teacher", "", nil)
+	check(preview, http.StatusOK)
+	video, err := os.ReadFile("../../examples/thai-lesson.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(preview.Body.Bytes(), video) || preview.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("teacher preview must return the uploaded video with caching disabled")
+	}
 	publish(first)
 	publish(first)
 
@@ -127,7 +161,10 @@ func TestReplayPublication(t *testing.T) {
 		t.Fatalf("unexpected published lesson: %+v", published)
 	}
 
-	second := create()
+	second := create(fixture)
+	if whisperCalls != 2 {
+		t.Fatalf("Whisper calls = %d, want 2 for two MP4-only requests", whisperCalls)
+	}
 	check(do("GET", videoPath(second), "student", "", nil), http.StatusNotFound)
 	rangeReq := httptest.NewRequest("GET", "http://localhost"+videoPath(first), nil)
 	rangeReq.Header.Set("Range", "bytes=50-89")

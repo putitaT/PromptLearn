@@ -1,4 +1,4 @@
-// Package openai implements the Responses API transport for structured generation.
+// Package openai implements the Responses and Audio Transcriptions API transports.
 package openai
 
 import (
@@ -27,10 +27,15 @@ func NewClient(key, model string, client *http.Client) *Client {
 
 type JSONRequest struct {
 	Input        string
-	ImageDataURL string
+	Images       []ImageInput
 	Instructions string
 	SchemaName   string
 	Schema       json.RawMessage
+}
+
+type ImageInput struct {
+	Caption string
+	DataURL string
 }
 
 type responseFormat struct {
@@ -74,11 +79,15 @@ type response struct {
 
 func (c *Client) GenerateJSON(ctx context.Context, input JSONRequest) (json.RawMessage, error) {
 	payload := responseRequest{Model: c.model, Input: input.Input, Instructions: input.Instructions}
-	if input.ImageDataURL != "" {
-		payload.Input = []inputMessage{{Role: "user", Content: []inputPart{
-			{Type: "input_text", Text: input.Input},
-			{Type: "input_image", ImageURL: input.ImageDataURL},
-		}}}
+	if len(input.Images) != 0 {
+		content := []inputPart{{Type: "input_text", Text: input.Input}}
+		for _, image := range input.Images {
+			if image.Caption != "" {
+				content = append(content, inputPart{Type: "input_text", Text: image.Caption})
+			}
+			content = append(content, inputPart{Type: "input_image", ImageURL: image.DataURL})
+		}
+		payload.Input = []inputMessage{{Role: "user", Content: content}}
 	}
 	payload.Text.Format = responseFormat{Type: "json_schema", Name: input.SchemaName, Strict: true, Schema: input.Schema}
 	body, err := json.Marshal(payload)

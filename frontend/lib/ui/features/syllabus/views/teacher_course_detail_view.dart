@@ -415,7 +415,7 @@ class _TeacherCourseDetailViewState extends State<TeacherCourseDetailView> {
           else ...[
             _ScheduleTable(rows: pageRows, dates: _dates, onPlan: _showPlan),
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.center,
               spacing: 6,
               children: [
                 IconButton(

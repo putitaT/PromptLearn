@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log"
@@ -17,13 +17,14 @@ import (
 )
 
 // NewDemoHandler adds opt-in, local replay routes alongside the regular API.
-func NewDemoHandler(syllabi *syllabus.Service, courses course.Repository, store *replay.Store, mediaDir, webDir string, options ...RouterOption) http.Handler {
+func NewDemoHandler(syllabi *syllabus.Service, courses course.Repository, store *replay.Store, transcriber replay.Transcriber, mediaDir, webDir string, options ...RouterOption) http.Handler {
 	mux := newRouter(syllabi, courses, options...)
-	demo := replayDemo{store: store, mediaDir: mediaDir}
+	demo := replayDemo{store: store, transcriber: transcriber, mediaDir: mediaDir}
 	mux.HandleFunc("POST /api/demo/recordings", demo.upload)
 	mux.HandleFunc("PUT /api/demo/publication", demo.publish)
 	mux.HandleFunc("GET /api/demo/replay", demo.published)
 	mux.HandleFunc("GET /api/demo/recordings/{id}/video", demo.video)
+	mux.HandleFunc("GET /api/demo/recordings/{id}/preview", demo.preview)
 	if webDir != "" {
 		mux.Handle("GET /", http.FileServer(http.Dir(webDir)))
 	}
@@ -46,8 +47,9 @@ func IsLoopbackHost(host string) bool {
 }
 
 type replayDemo struct {
-	store    *replay.Store
-	mediaDir string
+	store       *replay.Store
+	transcriber replay.Transcriber
+	mediaDir    string
 }
 
 func (d replayDemo) upload(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +62,7 @@ func (d replayDemo) upload(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &limit) {
 			writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "ขนาดไฟล์คลิปต้องไม่เกิน 50 MB")
 		} else {
-			writeAPIError(w, http.StatusBadRequest, "invalid_media", "เลือกไฟล์ MP4 และ transcript JSON")
+			writeAPIError(w, http.StatusBadRequest, "invalid_media", "เลือกไฟล์ MP4")
 		}
 		return
 	}
@@ -79,22 +81,6 @@ func (d replayDemo) upload(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "ขนาดไฟล์คลิปต้องไม่เกิน 50 MB")
 		return
 	}
-	transcript, header, err := r.FormFile("transcript")
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_media", "เลือกไฟล์ transcript JSON")
-		return
-	}
-	defer transcript.Close()
-	if header.Size > replay.MaxTranscriptBytes {
-		writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "ไฟล์ transcript ต้องไม่เกิน 256 KiB")
-		return
-	}
-	data, err := io.ReadAll(transcript)
-	if err != nil {
-		replayFailure(w, err)
-		return
-	}
-
 	file, err := os.CreateTemp(d.mediaDir, "recording-*.mp4")
 	if err != nil {
 		replayFailure(w, err)
@@ -113,23 +99,66 @@ func (d replayDemo) upload(w http.ResponseWriter, r *http.Request) {
 		replayFailure(w, err)
 		return
 	}
-	duration, err := replay.Probe(r.Context(), path)
+	media, err := replay.Probe(r.Context(), path)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_media", err.Error())
 		return
 	}
-	segments, err := replay.ParseTranscript(bytes.NewReader(data), duration)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_media", err.Error())
+	segments, ok := d.transcript(w, r, path, media)
+	if !ok {
 		return
 	}
-	id, err := d.store.Save(r.Context(), filepath.Base(path), size, duration, segments)
+	id, err := d.store.Save(r.Context(), filepath.Base(path), size, media.DurationMS, segments)
 	if err != nil {
 		replayFailure(w, err)
 		return
 	}
 	keep = true
 	writeJSON(w, http.StatusCreated, map[string]string{"recordingId": id})
+}
+
+func (d replayDemo) transcript(w http.ResponseWriter, r *http.Request, path string, media replay.Media) ([]replay.Segment, bool) {
+	file, header, err := r.FormFile("transcript")
+	if err == nil {
+		defer file.Close()
+		if header.Size > replay.MaxTranscriptBytes {
+			writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "ไฟล์ transcript ต้องไม่เกิน 256 KiB")
+			return nil, false
+		}
+		segments, err := replay.ParseTranscript(file, media.DurationMS)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_media", err.Error())
+			return nil, false
+		}
+		return segments, true
+	}
+	if !errors.Is(err, http.ErrMissingFile) || len(r.MultipartForm.Value["transcript"]) > 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_media", "เลือกไฟล์ transcript JSON")
+		return nil, false
+	}
+	if !media.HasAudio {
+		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_audio", "คลิปต้องมีแทร็กเสียงสำหรับถอดเสียง")
+		return nil, false
+	}
+	if d.transcriber == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "transcription_unavailable", "ยังไม่ได้ตั้งค่าบริการถอดเสียงบน backend")
+		return nil, false
+	}
+	segments, err := d.transcriber.Transcribe(r.Context(), path, media.DurationMS)
+	switch {
+	case err == nil:
+		return segments, true
+	case errors.Is(err, replay.ErrNoTranscript):
+		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_audio", err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		writeAPIError(w, http.StatusGatewayTimeout, "transcription_timeout", "ถอดเสียงเกินเวลา ลองใหม่อีกครั้ง")
+	case errors.Is(err, replay.ErrAudioProvider):
+		log.Printf("replay transcription: %v", err)
+		writeAPIError(w, http.StatusBadGateway, "transcription_failed", "บริการถอดเสียงตอบกลับไม่สำเร็จ ลองใหม่อีกครั้ง")
+	default:
+		replayFailure(w, err)
+	}
+	return nil, false
 }
 
 func (d replayDemo) publish(w http.ResponseWriter, r *http.Request) {
@@ -172,8 +201,20 @@ func (d replayDemo) published(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d replayDemo) video(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 	key, err := d.store.PublishedKey(r.Context(), r.PathValue("id"))
+	d.serveVideo(w, r, key, err)
+}
+
+func (d replayDemo) preview(w http.ResponseWriter, r *http.Request) {
+	if !demoTeacher(w, r) {
+		return
+	}
+	key, err := d.store.PreviewKey(r.Context(), r.PathValue("id"))
+	d.serveVideo(w, r, key, err)
+}
+
+func (d replayDemo) serveVideo(w http.ResponseWriter, r *http.Request, key string, err error) {
+	w.Header().Set("Cache-Control", "no-store")
 	if err != nil {
 		replayFailure(w, err)
 		return

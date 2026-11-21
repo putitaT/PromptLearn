@@ -4,15 +4,18 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 // DemoRepository stores synthetic student reviews in the local data directory.
 type DemoRepository struct {
-	dir    string
-	engine string
+	dir     string
+	engine  string
+	reports sync.Mutex
 }
 
 type reviewEvidence struct {
@@ -54,25 +57,82 @@ func (r *DemoRepository) SaveReview(ctx context.Context, work Submission, result
 		StudentID: DemoStudentID, Engine: r.engine, Language: reviewLanguage(work), CreatedAt: time.Now().UTC(),
 		Evidence: evidenceFrom(work), Result: result,
 	}
-	file, err := os.CreateTemp(r.dir, ".review-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(file.Name())
-	defer file.Close()
-	if err := json.NewEncoder(file).Encode(event); err != nil {
-		return "", err
-	}
-	if err := file.Sync(); err != nil {
-		return "", err
-	}
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Rename(file.Name(), filepath.Join(r.dir, result.ReviewID+".json")); err != nil {
+	if err := writeDemoJSON(r.dir, result.ReviewID, event); err != nil {
 		return "", err
 	}
 	return result.ReviewID, nil
+}
+
+func (r *DemoRepository) LoadSubmissionReviews(ctx context.Context, assignmentID string, ids []string) ([]submissionReview, error) {
+	reviews := make([]submissionReview, 0, len(ids))
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		raw, err := os.ReadFile(filepath.Join(r.dir, id+".json"))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		var event demoEvent
+		if err := json.Unmarshal(raw, &event); err != nil {
+			return nil, err
+		}
+		if event.StudentID != DemoStudentID || event.Result.AssignmentID != assignmentID || event.Result.ReviewID != id {
+			return nil, ErrNotFound
+		}
+		question, err := r.FindQuestion(ctx, assignmentID, event.Result.ItemID)
+		if err != nil {
+			return nil, err
+		}
+		reviews = append(reviews, submissionReview{
+			result: event.Result, evidence: event.Evidence, prompt: question.Prompt, maxPoints: 1,
+		})
+	}
+	return reviews, nil
+}
+
+func (r *DemoRepository) SaveSubmissionReport(ctx context.Context, report SubmissionReport) (SubmissionReport, error) {
+	r.reports.Lock()
+	defer r.reports.Unlock()
+	if err := ctx.Err(); err != nil {
+		return SubmissionReport{}, err
+	}
+	dir := filepath.Join(r.dir, "submissions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return SubmissionReport{}, err
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, report.ID+".json"))
+	if err == nil {
+		err = json.Unmarshal(raw, &report)
+		return report, err
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return SubmissionReport{}, err
+	}
+	err = writeDemoJSON(dir, report.ID, report)
+	return report, err
+}
+
+func writeDemoJSON(dir, id string, value any) error {
+	file, err := os.CreateTemp(dir, ".pending-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+	if err := json.NewEncoder(file).Encode(value); err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), filepath.Join(dir, id+".json"))
 }
 
 func reviewLanguage(work Submission) string {

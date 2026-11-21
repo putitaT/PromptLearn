@@ -14,4 +14,17 @@ CREATE TABLE IF NOT EXISTS assignment_work_reviews (
 
 CREATE INDEX IF NOT EXISTS submissions_student_history ON submissions (student_id, assignment_id);
 
+-- A formative submission freezes one review ID per item alongside its score.
+-- Standalone Check my work revisions remain available for further practice.
+CREATE TABLE IF NOT EXISTS assignment_submission_reports (
+    id text PRIMARY KEY,
+    assignment_id uuid NOT NULL REFERENCES assignments,
+    student_id uuid NOT NULL REFERENCES users,
+    report jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS submission_reports_student_history
+    ON assignment_submission_reports (student_id, assignment_id, created_at DESC);
+
 COMMIT;

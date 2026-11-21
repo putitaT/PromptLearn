@@ -21,6 +21,8 @@ type Block struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
 	Box  Box    `json:"box"`
+
+	imageDataURL string
 }
 
 type Submission struct {
@@ -41,10 +43,17 @@ type Question struct {
 type Repository interface {
 	FindQuestion(ctx context.Context, assignmentID, itemID string) (Question, error)
 	SaveReview(context.Context, Submission, Result) (string, error)
+	LoadSubmissionReviews(context.Context, string, []string) ([]submissionReview, error)
+	SaveSubmissionReport(context.Context, SubmissionReport) (SubmissionReport, error)
 }
 
 type Reviewer interface {
 	Review(context.Context, Question, Submission) (Decision, error)
+}
+
+// PaperOCR reads lines and their locations on the original uploaded image.
+type PaperOCR interface {
+	ReadPaper(context.Context, string) ([]Block, error)
 }
 
 type Status string
@@ -85,10 +94,11 @@ type Result struct {
 type Service struct {
 	repo     Repository
 	reviewer Reviewer
+	ocr      PaperOCR
 }
 
-func NewService(repo Repository, reviewer Reviewer) *Service {
-	return &Service{repo: repo, reviewer: reviewer}
+func NewService(repo Repository, reviewer Reviewer, ocr PaperOCR) *Service {
+	return &Service{repo: repo, reviewer: reviewer, ocr: ocr}
 }
 
 func (s *Service) Review(ctx context.Context, assignmentID, itemID string, work Submission) (Result, error) {
@@ -99,9 +109,31 @@ func (s *Service) Review(ctx context.Context, assignmentID, itemID string, work 
 	if err != nil {
 		return Result{}, err
 	}
-	decision, err := s.reviewer.Review(ctx, question, work)
-	if err != nil {
-		return Result{}, err
+	if len(work.Blocks) == 0 && work.ImageDataURL != "" && s.ocr != nil {
+		work.Blocks, err = s.ocr.ReadPaper(ctx, work.ImageDataURL)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := validateBlocks(work.Blocks, ""); err != nil {
+			return Result{}, fmt.Errorf("%w: OCR blocks do not match the image contract", ErrInvalidDecision)
+		}
+		if strings.TrimSpace(work.Text) == "" {
+			lines := make([]string, 0, len(work.Blocks))
+			for _, block := range work.Blocks {
+				lines = append(lines, block.Text)
+			}
+			work.Text = strings.Join(lines, "\n")
+			if len(work.Text) > 32768 {
+				return Result{}, fmt.Errorf("%w: OCR text exceeds the size limit", ErrInvalidDecision)
+			}
+		}
+	}
+	decision := Decision{Status: Unreadable}
+	if len(work.Blocks) != 0 || strings.TrimSpace(work.Text) != "" {
+		decision, err = s.reviewer.Review(ctx, question, work)
+		if err != nil {
+			return Result{}, err
+		}
 	}
 	result, err := buildResult(assignmentID, itemID, work, decision)
 	if err != nil {
@@ -130,8 +162,18 @@ func validateWork(work Submission) error {
 	if work.ImageDataURL == "" && strings.TrimSpace(work.Text) == "" && len(work.Blocks) == 0 {
 		return fmt.Errorf("%w: provide OCR text or a paper image", ErrInvalidInput)
 	}
-	ids := make(map[string]bool, len(work.Blocks))
-	for _, block := range work.Blocks {
+	if work.ImageDataURL != "" && !validImage(work.ImageDataURL) {
+		return fmt.Errorf("%w: image_data_url must contain a valid Base64 JPEG or PNG within the size limit", ErrInvalidInput)
+	}
+	return validateBlocks(work.Blocks, work.FocusedBlockID)
+}
+
+func validateBlocks(blocks []Block, focusedID string) error {
+	if len(blocks) > 100 {
+		return fmt.Errorf("%w: OCR block count exceeds the limit", ErrInvalidInput)
+	}
+	ids := make(map[string]bool, len(blocks))
+	for _, block := range blocks {
 		if strings.TrimSpace(block.ID) == "" || len(block.ID) > 128 ||
 			ids[block.ID] || strings.TrimSpace(block.Text) == "" || len(block.Text) > 2048 ||
 			strings.ContainsRune(block.ID, 0) || strings.ContainsRune(block.Text, 0) || !validBox(block.Box) {
@@ -139,11 +181,8 @@ func validateWork(work Submission) error {
 		}
 		ids[block.ID] = true
 	}
-	if work.FocusedBlockID != "" && !ids[work.FocusedBlockID] {
+	if focusedID != "" && !ids[focusedID] {
 		return fmt.Errorf("%w: focused_block_id must match a submitted OCR block", ErrInvalidInput)
-	}
-	if work.ImageDataURL != "" && !validImage(work.ImageDataURL) {
-		return fmt.Errorf("%w: image_data_url must contain a valid Base64 JPEG or PNG within the size limit", ErrInvalidInput)
 	}
 	return nil
 }
@@ -152,7 +191,7 @@ func buildResult(assignmentID, itemID string, work Submission, decision Decision
 	message, known := statusMessages[decision.Status]
 	if !known || len(decision.Findings) > 3 ||
 		((decision.Status == NeedsRevision) != (len(decision.Findings) > 0)) {
-		return Result{}, ErrInvalidDecision
+		return Result{}, fmt.Errorf("%w: status does not match the findings", ErrInvalidDecision)
 	}
 
 	positions := make(map[string]int, len(work.Blocks))
@@ -168,7 +207,7 @@ func buildResult(assignmentID, itemID string, work Submission, decision Decision
 		index, matched := positions[finding.BlockID]
 		text, recognized := prompts[finding.Kind]
 		if !matched || !recognized || seen[finding.BlockID] {
-			return Result{}, ErrInvalidDecision
+			return Result{}, fmt.Errorf("%w: finding refers to an unknown or duplicate OCR block or an unknown hint", ErrInvalidDecision)
 		}
 		seen[finding.BlockID] = true
 		result.Issues = append(result.Issues, Issue{

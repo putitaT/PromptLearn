@@ -152,14 +152,25 @@ func (s *Store) Published(ctx context.Context) (*Recording, error) {
 }
 
 func (s *Store) PublishedKey(ctx context.Context, id string) (string, error) {
+	return s.recordingKey(ctx, id, true)
+}
+
+func (s *Store) PreviewKey(ctx context.Context, id string) (string, error) {
+	return s.recordingKey(ctx, id, false)
+}
+
+func (s *Store) recordingKey(ctx context.Context, id string, publishedOnly bool) (string, error) {
 	var key string
 	err := s.db.QueryRow(ctx, `
 		SELECT a.object_key
-		FROM promptlearn.lesson_publications p
-		JOIN promptlearn.recordings r ON r.id = p.recording_id
+		FROM promptlearn.recordings r
 		JOIN promptlearn.assets a ON a.id = r.asset_id AND a.status = 'ready'
-		WHERE p.session_id = $1 AND r.id::text = $2
-	`, SessionID, id).Scan(&key)
+		WHERE r.session_id = $1 AND r.id::text = $2
+		  AND (NOT $3::boolean OR EXISTS (
+			SELECT 1 FROM promptlearn.lesson_publications p
+			WHERE p.session_id = r.session_id AND p.recording_id = r.id
+		  ))
+	`, SessionID, id, publishedOnly).Scan(&key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}

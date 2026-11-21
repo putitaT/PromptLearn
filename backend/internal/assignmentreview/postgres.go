@@ -13,9 +13,16 @@ import (
 )
 
 const (
-	demoAssignmentUUID = "a1000000-0000-4000-8000-000000000016"
-	demoItemUUID       = "a1000000-0000-4000-8000-000000000015"
+	demoAssignmentUUID     = "a1000000-0000-4000-8000-000000000016"
+	homeworkAssignmentUUID = "a1000000-0000-4000-8000-000000000028"
 )
+
+func demoAssignmentKey(assignmentID string) string {
+	if assignmentID == HomeworkAssignmentID {
+		return homeworkAssignmentUUID
+	}
+	return demoAssignmentUUID
+}
 
 // PostgresDemoRepository uses a server-selected synthetic student and assignment.
 // A production repository needs the student identity from an authenticated session.
@@ -40,6 +47,10 @@ func OpenPostgresDemo(ctx context.Context, databaseURL, engine string) (*Postgre
 		db.Close()
 		return nil, errors.New("review demo item is unavailable; apply demo_seed.sql and assignment_review_demo_seed.sql")
 	}
+	if _, err := repo.FindQuestion(ctx, HomeworkAssignmentID, homeworkItemIDs[3]); err != nil {
+		db.Close()
+		return nil, errors.New("four-question homework is unavailable; apply assignment_review_demo_seed.sql")
+	}
 	return repo, nil
 }
 
@@ -53,7 +64,7 @@ const demoReviewTarget = `
 	  ON m.offering_id = a.offering_id AND m.user_id = $3::uuid AND m.role = 'student'
 	LEFT JOIN promptlearn.assignment_recipients recipient
 	  ON recipient.assignment_id = a.id AND recipient.student_id = m.user_id
-	WHERE a.id = $1::uuid AND i.id = $2::uuid AND i.kind = 'show_work'
+	WHERE a.id = $1::uuid AND i.position = $2::integer AND i.kind = 'show_work'
 	  AND a.allow_ai_hints AND a.published_at <= now()
 	  AND (a.audience = 'class' OR recipient.student_id IS NOT NULL)
 	  AND (a.opens_at IS NULL OR a.opens_at <= now())
@@ -62,7 +73,8 @@ const demoReviewTarget = `
 `
 
 func (r *PostgresDemoRepository) FindQuestion(ctx context.Context, assignmentID, itemID string) (Question, error) {
-	if !isDemoItem(assignmentID, itemID) {
+	position := demoPosition(assignmentID, itemID)
+	if position == 0 {
 		return Question{}, ErrNotFound
 	}
 	var question Question
@@ -74,7 +86,7 @@ func (r *PostgresDemoRepository) FindQuestion(ctx context.Context, assignmentID,
 			), ''), E'\n' ORDER BY c.position)
 			FROM promptlearn.rubric_criteria c WHERE c.item_id = i.id
 		), '')
-	`+demoReviewTarget, demoAssignmentUUID, demoItemUUID, DemoStudentID).
+	`+demoReviewTarget, demoAssignmentKey(assignmentID), position, DemoStudentID).
 		Scan(&question.Prompt, &question.AnswerKey, &question.Rubric)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Question{}, ErrNotFound
@@ -83,15 +95,18 @@ func (r *PostgresDemoRepository) FindQuestion(ctx context.Context, assignmentID,
 }
 
 type reviewTarget struct {
-	courseID  string
-	offering  string
-	version   string
-	position  int
-	outcomeID string
+	assignmentID string
+	itemID       string
+	courseID     string
+	offering     string
+	version      string
+	position     int
+	outcomeID    string
 }
 
 func (r *PostgresDemoRepository) SaveReview(ctx context.Context, work Submission, result Result) (string, error) {
-	if !isDemoItem(result.AssignmentID, result.ItemID) {
+	position := demoPosition(result.AssignmentID, result.ItemID)
+	if position == 0 {
 		return "", ErrNotFound
 	}
 	payload, err := json.Marshal(evidenceFrom(work))
@@ -102,11 +117,11 @@ func (r *PostgresDemoRepository) SaveReview(ctx context.Context, work Submission
 	err = pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
 		var target reviewTarget
 		err := tx.QueryRow(ctx, `
-			SELECT a.course_id::text, a.offering_id::text, a.assessment_version_id::text, i.position,
+			SELECT a.id::text, i.id::text, a.course_id::text, a.offering_id::text, a.assessment_version_id::text, i.position,
 			       COALESCE((SELECT CASE WHEN COUNT(*) = 1 THEN MIN(outcome_id::text) END
 			                 FROM promptlearn.assessment_item_outcomes WHERE item_id = i.id), '')
-		`+demoReviewTarget, demoAssignmentUUID, demoItemUUID, DemoStudentID).
-			Scan(&target.courseID, &target.offering, &target.version, &target.position, &target.outcomeID)
+		`+demoReviewTarget, demoAssignmentKey(result.AssignmentID), position, DemoStudentID).
+			Scan(&target.assignmentID, &target.itemID, &target.courseID, &target.offering, &target.version, &target.position, &target.outcomeID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -140,7 +155,7 @@ func insertDemoRevision(ctx context.Context, tx pgx.Tx, target reviewTarget, pay
 		INSERT INTO promptlearn.submissions (assignment_id, offering_id, assessment_version_id, student_id, attempt_number)
 		VALUES ($1, $2, $3, $4, 1)
 		ON CONFLICT (assignment_id, student_id, attempt_number) DO NOTHING
-	`, demoAssignmentUUID, target.offering, target.version, DemoStudentID)
+	`, target.assignmentID, target.offering, target.version, DemoStudentID)
 	if err != nil {
 		return "", err
 	}
@@ -150,7 +165,7 @@ func insertDemoRevision(ctx context.Context, tx pgx.Tx, target reviewTarget, pay
 		FROM promptlearn.submissions
 		WHERE assignment_id = $1 AND student_id = $2 AND attempt_number = 1 AND submitted_at IS NULL
 		FOR UPDATE
-	`, demoAssignmentUUID, DemoStudentID).Scan(&submissionID)
+	`, target.assignmentID, DemoStudentID).Scan(&submissionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrAttemptClosed
 	}
@@ -163,7 +178,7 @@ func insertDemoRevision(ctx context.Context, tx pgx.Tx, target reviewTarget, pay
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (submission_id, item_id) DO UPDATE SET skipped = false
 		RETURNING id::text
-	`, submissionID, target.version, demoItemUUID, target.position).Scan(&responseID)
+	`, submissionID, target.version, target.itemID, target.position).Scan(&responseID)
 	if err != nil {
 		return "", err
 	}
@@ -174,7 +189,7 @@ func insertDemoRevision(ctx context.Context, tx pgx.Tx, target reviewTarget, pay
 		FROM promptlearn.response_revisions
 		WHERE response_id = $1
 		RETURNING id::text
-	`, responseID, demoItemUUID, payload).Scan(&revisionID)
+	`, responseID, target.itemID, payload).Scan(&revisionID)
 	return revisionID, err
 }
 

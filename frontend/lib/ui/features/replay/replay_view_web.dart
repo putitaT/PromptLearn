@@ -5,6 +5,7 @@ import 'package:web/web.dart' as web;
 
 import '../../../domain/models/user_role.dart';
 import '../../core/theme/app_theme.dart';
+import 'draft_preview.dart';
 import 'replay_api.dart';
 import 'replay_player.dart';
 
@@ -56,31 +57,28 @@ class _TeacherReplay extends StatefulWidget {
 
 class _TeacherReplayState extends State<_TeacherReplay> {
   web.File? _video;
-  web.File? _transcript;
   String? _recordingId;
   String? _message;
   bool _error = false;
   bool _uploading = false;
   bool _publishing = false;
   bool _published = false;
+  bool _showPreview = false;
   double? _progress;
 
-  void _pick({required bool video}) {
+  void _pick() {
     final input = web.HTMLInputElement()
       ..type = 'file'
-      ..accept = video ? '.mp4,video/mp4' : '.json,application/json'
-      ..setAttribute('aria-label', video ? 'MP4' : 'Transcript JSON');
+      ..accept = '.mp4,video/mp4'
+      ..setAttribute('aria-label', 'MP4');
     input.onchange = ((web.Event _) {
       final file = input.files?.item(0);
       if (file == null || !mounted) return;
       setState(() {
-        if (video) {
-          _video = file;
-        } else {
-          _transcript = file;
-        }
+        _video = file;
         _recordingId = null;
         _published = false;
+        _showPreview = false;
         _message = null;
       });
     }).toJS;
@@ -89,15 +87,14 @@ class _TeacherReplayState extends State<_TeacherReplay> {
 
   Future<void> _upload() async {
     final video = _video;
-    final transcript = _transcript;
-    if (video == null || transcript == null) return;
+    if (video == null) return;
     setState(() {
       _uploading = true;
       _progress = 0;
       _message = null;
     });
     try {
-      final id = await ReplayApi.upload(video, transcript, (progress) {
+      final id = await ReplayApi.upload(video, (progress) {
         if (mounted) setState(() => _progress = progress);
       });
       if (!mounted) return;
@@ -125,6 +122,7 @@ class _TeacherReplayState extends State<_TeacherReplay> {
       if (!mounted) return;
       setState(() {
         _published = true;
+        _showPreview = false;
         _message = 'เผยแพร่แล้ว นักเรียนเปิดดูได้';
         _error = false;
       });
@@ -157,24 +155,14 @@ class _TeacherReplayState extends State<_TeacherReplay> {
           children: [
             Text('คลิปย้อนหลัง', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
-            _fileRow(
-              'คลิป MP4',
-              _video,
-              busy ? null : () => _pick(video: true),
-            ),
-            const Divider(height: 24),
-            _fileRow(
-              'Transcript JSON',
-              _transcript,
-              busy ? null : () => _pick(video: false),
-            ),
+            _fileRow('คลิป MP4', _video, busy ? null : _pick),
             const SizedBox(height: 20),
             if (_uploading) ...[
-              LinearProgressIndicator(value: progress),
+              LinearProgressIndicator(value: progress == 1 ? null : progress),
               const SizedBox(height: 8),
               Text(
                 progress == 1
-                    ? 'กำลังตรวจไฟล์'
+                    ? 'กำลังถอดเสียงคลิป'
                     : progress == null
                     ? 'กำลังอัปโหลด'
                     : 'อัปโหลด ${(progress * 100).round()}%',
@@ -202,15 +190,20 @@ class _TeacherReplayState extends State<_TeacherReplay> {
               runSpacing: 8,
               children: [
                 OutlinedButton(
-                  onPressed:
-                      busy ||
-                          _video == null ||
-                          _transcript == null ||
-                          _recordingId != null
+                  onPressed: busy || _video == null || _recordingId != null
                       ? null
                       : _upload,
                   child: const Text('อัปโหลด'),
                 ),
+                if (_recordingId != null && !_published)
+                  OutlinedButton(
+                    onPressed: busy
+                        ? null
+                        : () => setState(() => _showPreview = !_showPreview),
+                    child: Text(
+                      _showPreview ? 'ปิดพรีวิว' : 'พรีวิวคลิปฉบับร่าง',
+                    ),
+                  ),
                 FilledButton(
                   onPressed: busy || _recordingId == null || _published
                       ? null
@@ -219,6 +212,10 @@ class _TeacherReplayState extends State<_TeacherReplay> {
                 ),
               ],
             ),
+            if (_recordingId case final id? when _showPreview) ...[
+              const SizedBox(height: 16),
+              DraftPreview(key: ValueKey(id), recordingId: id),
+            ],
           ],
         ),
       ),
